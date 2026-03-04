@@ -39,8 +39,13 @@ RUN npm config set registry https://registry.npmmirror.com/ \
 # 3. 从第一阶段复制构建好的前端静态资源
 COPY --from=builder /app/dist ./dist
 
-# 4. 复制后端入口文件
-COPY server.js ./
+# 4. 复制后端入口文件及其依赖的本地模块
+COPY server.js ./server.js
+COPY iptv-cctv.js ./iptv-cctv.js
+
+# 如需在容器内持久化本地数据（如 admin.json / sources.json），可挂载宿主机目录到 /app/data
+# 这里仅创建目录，实际文件会在运行时生成
+RUN mkdir -p /app/data
 
 # 5. 暴露端口并启动
 EXPOSE 3000
