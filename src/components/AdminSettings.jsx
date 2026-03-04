@@ -73,7 +73,8 @@ const AdminSettings = ({ isOpen, onClose }) => {
       // Update the state with the fetched sources
       setSources(data);
     } catch (err) {
-      setError(err.message);
+      setToastType('error');
+      setToastMessage(err.message || '加载源站列表失败');
       console.error('Error fetching sources:', err);
     } finally {
       setLoading(false);
@@ -91,13 +92,15 @@ const AdminSettings = ({ isOpen, onClose }) => {
 
     // Validate new source
     if (!trimmed.key || !trimmed.name || !trimmed.url) {
-      setError('请填写所有必填字段');
+      setToastType('error');
+      setToastMessage('请填写所有必填字段');
       return;
     }
 
     // Check if source key already exists
     if (sources.some(source => source.key === trimmed.key)) {
-      setError('源站标识已存在');
+      setToastType('error');
+      setToastMessage('源站标识已存在');
       return;
     }
 
@@ -125,7 +128,8 @@ const AdminSettings = ({ isOpen, onClose }) => {
     };
     // Validate edited source
     if (!trimmed.key || !trimmed.name || !trimmed.url) {
-      setError('请填写所有必填字段');
+      setToastType('error');
+      setToastMessage('请填写所有必填字段');
       return;
     }
 
@@ -140,6 +144,13 @@ const AdminSettings = ({ isOpen, onClose }) => {
   };
 
   const handleDeleteSource = (sourceKey) => {
+    // 固定的 IPTV 源（key=iptv）不允许删除
+    if (sourceKey === 'iptv') {
+      setToastType('error');
+      setToastMessage('IPTV 源为固定数据源，无法删除');
+      return;
+    }
+
     openConfirmDialog(
       '确定要删除此源站吗？此操作不可恢复。',
       () => {
@@ -150,6 +161,32 @@ const AdminSettings = ({ isOpen, onClose }) => {
         });
       },
       '删除源站'
+    );
+  };
+
+  const handleRefreshIptv = () => {
+    openConfirmDialog(
+      '确定要刷新 IPTV 数据吗？这会重新抓取最新的 CCTV 频道列表并写入 Redis。',
+      async () => {
+        try {
+          setLoading(true);
+          const result = await api.refreshIptvCctv();
+          if (result.code === 1) {
+            setToastType('success');
+            setToastMessage(`IPTV 已刷新，当前频道数：${result.total}`);
+          } else {
+            setToastType('error');
+            setToastMessage(`IPTV 刷新失败：${result.msg || '未知错误'}`);
+          }
+        } catch (err) {
+          setToastType('error');
+          setToastMessage(err.message || 'IPTV 刷新失败');
+          console.error('Error refreshing IPTV:', err);
+        } finally {
+          setLoading(false);
+        }
+      },
+      '刷新 IPTV 数据'
     );
   };
 
@@ -189,7 +226,8 @@ const AdminSettings = ({ isOpen, onClose }) => {
       setRedisSources(sourcesWithUrl);
       setShowRedisSyncPreview(true);
     } catch (err) {
-      setError(err.message);
+      setToastType('error');
+      setToastMessage(err.message || '从 Redis 同步源站配置失败');
       console.error('Error syncing from Redis:', err);
     } finally {
       setLoading(false);
@@ -234,9 +272,8 @@ const AdminSettings = ({ isOpen, onClose }) => {
       setToastType('success');
       setToastMessage(successMessage);
     } catch (err) {
-      setError(err.message);
       setToastType('error');
-      setToastMessage(err.message);
+      setToastMessage(err.message || '源站配置保存失败');
       console.error('Error saving sources:', err);
     } finally {
       setLoading(false);
@@ -432,13 +469,24 @@ const AdminSettings = ({ isOpen, onClose }) => {
                             >
                               <Edit size={14} />
                             </button>
-                            <button
-                              onClick={() => handleDeleteSource(source.key)}
-                              className="p-1 text-red-400 hover:bg-slate-700 rounded transition-colors"
-                              title="删除"
-                            >
-                              <Trash2 size={14} />
-                            </button>
+                            {source.key === 'iptv' ? (
+                              <button
+                                onClick={handleRefreshIptv}
+                                className="p-1 text-green-400 hover:bg-slate-700 rounded transition-colors"
+                                title="刷新 IPTV 数据"
+                                disabled={loading}
+                              >
+                                <RefreshCw size={14} />
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => handleDeleteSource(source.key)}
+                                className="p-1 text-red-400 hover:bg-slate-700 rounded transition-colors"
+                                title="删除"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -541,8 +589,8 @@ const AdminSettings = ({ isOpen, onClose }) => {
                         <input
                           type="text"
                           value={editingSource.key}
-                          onChange={(e) => setEditingSource({ ...editingSource, key: e.target.value })}
-                          className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+                          disabled
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-400 cursor-not-allowed"
                           placeholder="唯一标识"
                         />
                       </div>

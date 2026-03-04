@@ -1,28 +1,42 @@
-# --- 第一阶段：构建环境 ---
+# --- 第一阶段：构建环境（仅安装依赖 + 前端打包） ---
 FROM node:20-slim AS builder
 
 WORKDIR /app
 
-# 1. 安装所有依赖（包括构建工具）
+# 1. 仅复制依赖清单，最大化利用缓存
 COPY package*.json ./
-RUN npm install
 
-# 2. 复制源码并构建前端
-COPY . .
+# 2. 安装全部依赖（包含构建工具），利用 npm 缓存加速重复构建
+#    使用国内镜像源加速（可按需替换为你自己的镜像）
+RUN npm config set registry https://registry.npmmirror.com/ \
+  && npm install
+
+# 3. 只复制构建前端所需的文件，避免 server.js / data 等变动导致前端重新打包
+COPY vite.config.js ./vite.config.js
+COPY tailwind.config.js ./tailwind.config.js
+COPY postcss.config.js ./postcss.config.js
+COPY index.html ./index.html
+COPY public ./public
+COPY src ./src
+
+# 4. 构建前端
 RUN npm run build
 
-# --- 第二阶段：运行环境 ---
+
+# --- 第二阶段：运行环境（仅包含运行所需依赖 + 构建产物） ---
 FROM node:20-slim
 
 WORKDIR /app
 
-# 1. 仅复制 package.json 用于安装生产依赖
+# 1. 仅复制 package.json / package-lock 用于安装生产依赖
 COPY package*.json ./
 
 # 2. 仅安装生产环境依赖 (去除 vite, tailwind 等构建工具)
-RUN npm install --omit=dev
+#    同样使用国内镜像源
+RUN npm config set registry https://registry.npmmirror.com/ \
+  && npm install --omit=dev
 
-# 3. 从第一阶段复制构建好的 dist 目录 (只包含静态文件)
+# 3. 从第一阶段复制构建好的前端静态资源
 COPY --from=builder /app/dist ./dist
 
 # 4. 复制后端入口文件

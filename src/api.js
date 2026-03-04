@@ -152,6 +152,15 @@ export const api = {
             }
         }
 
+        // IPTV 源（key=iptv）直接请求内部 IPTV 接口
+        if (sourceKey === 'iptv') {
+            const res = await fetch(`${API_BASE_URL}/source/iptv`, {
+                headers: getAuthHeaders(),
+                credentials: 'omit'
+            });
+            return handleResponse(res);
+        }
+
         const url = new URL(`${API_BASE_URL}/video`);
         url.searchParams.append('key', sourceKey);
         url.searchParams.append('ac', 'detail');
@@ -233,6 +242,16 @@ export const api = {
                 sources,
                 syncToRedis
             })
+        });
+        return handleResponse(res);
+    },
+
+    // 刷新 IPTV（CCTV）数据（管理员专用）
+    refreshIptvCctv: async () => {
+        const res = await fetch(`${API_BASE_URL}/iptv/cctv/refresh`, {
+            method: "GET",
+            headers: getAuthHeaders(),
+            credentials: 'omit'
         });
         return handleResponse(res);
     },
