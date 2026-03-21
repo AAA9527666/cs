@@ -1,7 +1,16 @@
 import React from 'react';
-import { Search, Play } from 'lucide-react';
+import { Search, Play, ChevronLeft, ChevronRight } from 'lucide-react';
 
-const VideoList = ({ videos, loading, view, searchProgress, handleVideoClick }) => {
+const VideoList = ({
+  videos,
+  loading,
+  view,
+  searchProgress,
+  handleVideoClick,
+  sourcePageMap = {},
+  pagingLoadingMap = {},
+  onSourcePageChange
+}) => {
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-32 text-blue-400">
@@ -24,17 +33,63 @@ const VideoList = ({ videos, loading, view, searchProgress, handleVideoClick }) 
         {videos.map((group) => (
           group.list && group.list.length > 0 && (
             <div key={group.source.key} className="bg-slate-800/20 rounded-xl p-4 border border-white/5">
-              <div className="flex items-center gap-2 mb-4">
-                <span className="bg-blue-600 w-1 h-5 rounded-full"></span>
-                <h2 className="text-lg font-bold text-white">{group.source.name}</h2>
-                <span className="text-xs text-slate-500 bg-slate-800 px-2 py-0.5 rounded-full">
-                  {group.list.length}
-                </span>
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="bg-blue-600 w-1 h-5 rounded-full"></span>
+                  <h2 className="text-lg font-bold text-white truncate">{group.source.name}</h2>
+                  <span className="text-xs text-slate-400 bg-slate-800 px-2 py-0.5 rounded-full">
+                    共 {Number(group.total) > 0 ? group.total : group.list.length} 条
+                  </span>
+                </div>
+                {Number(group.totalPages || 1) > 1 && (
+                  <div className="flex items-center gap-2 text-slate-300 text-sm shrink-0">
+                    <button
+                      type="button"
+                      disabled={(sourcePageMap[group.source.key] || group.page || 1) <= 1 || pagingLoadingMap[group.source.key]}
+                      onClick={() => onSourcePageChange && onSourcePageChange(group.source, (sourcePageMap[group.source.key] || group.page || 1) - 1)}
+                      className="px-1 text-slate-400 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                      aria-label={`${group.source.name} 上一页`}
+                      title="上一页"
+                    >
+                      <ChevronLeft size={14} />
+                    </button>
+                    <span className="text-slate-300 font-mono">
+                      {sourcePageMap[group.source.key] || group.page || 1} / {group.totalPages}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={(sourcePageMap[group.source.key] || group.page || 1) >= group.totalPages || pagingLoadingMap[group.source.key]}
+                      onClick={() => onSourcePageChange && onSourcePageChange(group.source, (sourcePageMap[group.source.key] || group.page || 1) + 1)}
+                      className="px-1 text-slate-400 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                      aria-label={`${group.source.name} 下一页`}
+                      title="下一页"
+                    >
+                      <ChevronRight size={14} />
+                    </button>
+                  </div>
+                )}
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6">
-                {group.list.map((v) => (
-                  <VideoCard key={v.uniqueId} video={v} onClick={() => handleVideoClick(v)} />
-                ))}
+              <div className="relative">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6">
+                  {group.list.map((v) => (
+                    <VideoCard key={v.uniqueId} video={v} onClick={() => handleVideoClick(v)} />
+                  ))}
+                </div>
+                {pagingLoadingMap[group.source.key] && (
+                    <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm flex items-start justify-center z-10 pt-4 rounded-xl">
+                    <div className="flex flex-col items-center">
+                      <div className="relative w-10 h-10">
+                        <div className="absolute inset-0 w-10 h-10 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin"></div>
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                        </div>
+                      </div>
+                      <div className="mt-2 text-center text-xs text-slate-200/90">
+                        正在加载...
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )

@@ -194,7 +194,7 @@ export const api = {
         return handleResponse(res);
     },
 
-    searchVideos: async (sourceKey, keyword, signal) => {
+    searchVideos: async (sourceKey, keyword, signal, page = 1) => {
         // 检查 token 是否即将过期，自动刷新
         if (tokenManager.isExpiringSoon()) {
             try {
@@ -208,6 +208,7 @@ export const api = {
         url.searchParams.append('key', sourceKey);
         url.searchParams.append('ac', 'detail');
         url.searchParams.append('wd', keyword);
+        url.searchParams.append('pg', page);
 
         const res = await fetch(url.toString(), {
             headers: getAuthHeaders(),

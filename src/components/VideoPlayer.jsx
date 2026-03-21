@@ -140,6 +140,31 @@ const VideoPlayer = ({ src, poster, title, sourceName, sourceDesc, onBack, curre
           'settings',
           'fullscreen'
         ],
+        // Plyr 控件文案中文化（i18n）
+        i18n: {
+          play: '播放',
+          pause: '暂停',
+          mute: '静音',
+          unmute: '取消静音',
+          volume: '音量',
+          enterFullscreen: '进入全屏',
+          exitFullscreen: '退出全屏',
+          settings: '设置',
+          speed: '播放速度',
+          normal: '正常',
+          quality: '画质',
+          captions: '字幕',
+          enableCaptions: '开启字幕',
+          disableCaptions: '关闭字幕',
+          rewind: '快退 {seektime} 秒',
+          fastForward: '快进 {seektime} 秒',
+          seek: '跳转',
+          seekLabel: '{currentTime} / {duration}',
+          currentTime: '当前时间',
+          duration: '总时长',
+          menuBack: '返回',
+          restart: '重新播放'
+        },
         ratio: '16:9', // 强制 16:9 比例，防止竖屏视频撑破容器
         autoplay: true,
         muted: false,
@@ -147,7 +172,7 @@ const VideoPlayer = ({ src, poster, title, sourceName, sourceDesc, onBack, curre
         resetOnEnd: false,
         keyboard: { focused: true, global: true },
         tooltips: { controls: true, seek: true },
-        speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] },
+        speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3] },
         fullscreen: { enabled: true, fallback: true, iosNative: true }
       });
 
