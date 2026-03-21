@@ -172,7 +172,7 @@ const VideoPlayer = ({ src, poster, title, sourceName, sourceDesc, onBack, curre
         resetOnEnd: false,
         keyboard: { focused: true, global: true },
         tooltips: { controls: true, seek: true },
-        speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3] },
+        speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] },
         fullscreen: { enabled: true, fallback: true, iosNative: true }
       });
 
@@ -471,7 +471,7 @@ const VideoPlayer = ({ src, poster, title, sourceName, sourceDesc, onBack, curre
 
       </div>
 
-      <div className="relative w-full aspect-video bg-black rounded-xl overflow-hidden shadow-2xl ring-1 ring-white/10 group" ref={playerContainerRef}>
+      <div className="player-shell relative z-10 w-full aspect-video bg-black rounded-xl overflow-visible shadow-2xl ring-1 ring-white/10 group" ref={playerContainerRef}>
         {/* 视频元素 - 按照文档推荐的方式 */}
         <video
           ref={videoRef}

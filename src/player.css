@@ -87,3 +87,47 @@
     opacity: 1 !important;
     visibility: visible !important;
 }
+
+/* 播放器菜单层级与裁剪：防止设置菜单被遮挡 */
+.player-shell {
+    overflow: visible;
+}
+
+.player-shell .plyr {
+    border-radius: 0.75rem;
+    overflow: hidden;
+}
+
+.player-shell .plyr__controls {
+    position: relative;
+    z-index: 10;
+}
+
+.player-shell .plyr__menu__container {
+    z-index: 100 !important;
+    /* 菜单整体留白缩小 */
+    padding: 4px;
+    min-width: auto;
+}
+
+/* 设置子菜单（播放速度等）行内边距更紧凑 */
+.player-shell .plyr__menu .plyr__control {
+    padding: 5px 8px;
+    min-height: auto;
+}
+
+/* 防止右侧菜单值（如 0.5x）和前进箭头重叠 */
+.player-shell .plyr__menu .plyr__control--forward {
+    padding-right: 25px;
+}
+
+.player-shell .plyr__menu .plyr__control--back {
+    padding: 5px 20px;
+    margin-bottom: 2px;
+}
+
+/* 菜单内部容器去掉多余外边距 */
+.player-shell .plyr__menu [role="menu"] {
+    padding: 0;
+    margin: 0;
+}

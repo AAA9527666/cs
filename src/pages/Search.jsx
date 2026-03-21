@@ -252,7 +252,6 @@ export default function Search({ sources, selectedSearchSources, searchSourceMod
     const currentGroup = videos.find(group => group?.source?.key === source.key);
     const totalPages = Number(currentGroup?.totalPages) || 1;
     if (safeTargetPage < 1 || safeTargetPage > totalPages) return;
-    if (!searchAbortController.current) return;
 
     setPagingLoadingMap(prev => ({ ...prev, [source.key]: true }));
 
@@ -261,7 +260,7 @@ export default function Search({ sources, selectedSearchSources, searchSourceMod
         source,
         kw: keyword,
         page: safeTargetPage,
-        signal: searchAbortController.current.signal
+        signal: searchAbortController.current?.signal
       });
 
       setVideos(prev => prev.map(group => (
