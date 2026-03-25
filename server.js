@@ -118,7 +118,7 @@ const INITIAL_SOURCES = ensureIptvSource([
 ]);
 
 let SOURCE_CACHE = [];
-let USER_PASSWORD = null;
+//let USER_PASSWORD = null;
 
 /* ================= 管理员密码 ================= */
 
