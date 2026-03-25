@@ -32,8 +32,16 @@ const logger = {
 
 /* ================= Redis ================= */
 
+// 默认尝试连接本机 Redis，除非显式覆盖 REDIS_URL
 const DEFAULT_REDIS_URL = "redis://127.0.0.1:6379/0";
 const REDIS_URL = process.env.REDIS_URL || DEFAULT_REDIS_URL;
+
+if (!process.env.REDIS_URL) {
+  logger.warn(
+    "未显式配置 REDIS_URL，使用默认 Redis 配置：",
+    DEFAULT_REDIS_URL
+  );
+}
 
 const redis = new Redis(REDIS_URL, { retryStrategy: () => null });
 
@@ -110,9 +118,35 @@ const INITIAL_SOURCES = ensureIptvSource([
 ]);
 
 let SOURCE_CACHE = [];
+let USER_PASSWORD = null;
 
-/* ================= 统一密码 ================= */
-const SITE_PASSWORD = "123123";
+/* ================= 管理员密码 ================= */
+
+let ADMIN_PASSWORD = readJson("admin.json")?.password;
+
+if (!ADMIN_PASSWORD) {
+  ADMIN_PASSWORD = crypto.randomBytes(6).toString("hex");
+  writeJson("admin.json", { password: ADMIN_PASSWORD });
+  logger.warn("⚠️ 管理员密码已生成：", ADMIN_PASSWORD);
+}
+
+/* ================= 加载用户密码 ================= */
+
+(async () => {
+  const local = readJson("password.json");
+  if (local?.password) {
+    USER_PASSWORD = local.password;
+    return;
+  }
+
+  if (redis) {
+    const r = await redis.get("video:password");
+    if (r) {
+      USER_PASSWORD = r;
+      writeJson("password.json", { password: r });
+    }
+  }
+})();
 
 /* ================= 加载源站 ================= */
 
@@ -157,6 +191,7 @@ if (redis) {
     enabled: true,
     hours: IPTV_REFRESH_HOURS,
     url: IPTV_CCTV_URL,
+    // 定时任务只写 Redis，不再写本地 JSON
     savePath: undefined,
     logger,
     onResult: async (data) => {
@@ -169,6 +204,7 @@ if (redis) {
   );
 }
 
+// 管理员手动刷新一次，并写入 Redis（如果存在）
 app.get("/api/iptv/cctv/refresh", auth, adminOnly, async (req, res) => {
   const r = await parseIptvToAppleCmsCctv({
     url: IPTV_CCTV_URL,
@@ -180,6 +216,8 @@ app.get("/api/iptv/cctv/refresh", auth, adminOnly, async (req, res) => {
   res.json(r);
 });
 
+// 作为“第三方源”的 Apple CMS 风格接口，前端/后台可当作普通 sources 使用
+// 仅在携带有效 Authorization token 时可访问
 app.get("/api/source/iptv", auth, async (req, res) => {
   try {
     let cached = null;
@@ -198,6 +236,7 @@ app.get("/api/source/iptv", auth, async (req, res) => {
       return res.json(cached);
     }
 
+    // 没有缓存时临时抓一次（不会写本地 JSON）
     const fresh = await parseIptvToAppleCmsCctv({
       url: IPTV_CCTV_URL,
       writeToFile: false,
@@ -212,7 +251,7 @@ app.get("/api/source/iptv", auth, async (req, res) => {
   }
 });
 
-/* ================= HTTP/HTTPS 流代理 ================= */
+/* ================= HTTP/HTTPS 流代理（解决 https 页面播放 http 资源） ================= */
 
 const PROXY_ALLOW_PRIVATE = (process.env.PROXY_ALLOW_PRIVATE || "false")
   .toLowerCase()
@@ -267,6 +306,7 @@ const rewriteM3u8 = ({ playlistText, playlistUrl, req }) => {
     const l = line.trim();
     if (!l) return line;
 
+    // EXT-X-KEY:URI="..."
     if (l.startsWith("#EXT-X-KEY")) {
       return line.replace(/URI="([^"]+)"/g, (m, uri) => {
         try {
@@ -278,6 +318,7 @@ const rewriteM3u8 = ({ playlistText, playlistUrl, req }) => {
       });
     }
 
+    // 非注释行视为 URI（分片/子清单）
     if (l.startsWith("#")) return line;
 
     try {
@@ -320,16 +361,21 @@ app.get("/api/proxy", async (req, res) => {
       timeout: 15000,
       maxRedirects: 3,
       headers: {
+        // 透传 Range（HLS 分片常用）
         ...(req.headers.range ? { range: req.headers.range } : {}),
-        "user-agent": req.headers["user-agent"] || "Mozilla/5.0",
+        "user-agent":
+          req.headers["user-agent"] ||
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) movie-app/proxy",
         accept: req.headers.accept || "*/*",
       },
+      // 允许抓取自签名 https 源（部分直播源会这样）
       httpsAgent: new https.Agent({ rejectUnauthorized: false }),
       validateStatus: () => true,
     });
 
     const ct = upstream.headers["content-type"] || "";
 
+    // m3u8 需要改写内部链接为 /api/proxy?url=...
     if (looksLikeM3u8(target.toString(), ct)) {
       let buf = "";
       upstream.data.setEncoding("utf-8");
@@ -341,19 +387,33 @@ app.get("/api/proxy", async (req, res) => {
           req,
         });
         res.status(upstream.status || 200);
-        res.setHeader("content-type", "application/vnd.apple.mpegurl; charset=utf-8");
-        res.setHeader("cache-control", upstream.headers["cache-control"] || "no-store");
+        res.setHeader(
+          "content-type",
+          "application/vnd.apple.mpegurl; charset=utf-8"
+        );
+        if (upstream.headers["cache-control"]) {
+          res.setHeader("cache-control", upstream.headers["cache-control"]);
+        } else {
+          res.setHeader("cache-control", "no-store");
+        }
         res.send(rewritten);
       });
       upstream.data.on("error", () => res.status(502).send("upstream error"));
       return;
     }
 
+    // 其他内容直接透传（ts/mp4/key 等）
     res.status(upstream.status || 200);
     for (const [k, v] of Object.entries(upstream.headers || {})) {
       const key = k.toLowerCase();
-      if (["transfer-encoding", "content-encoding", "connection"].includes(key)) continue;
-      if (v) res.setHeader(k, v);
+      if (
+        key === "transfer-encoding" ||
+        key === "content-encoding" ||
+        key === "connection"
+      ) {
+        continue;
+      }
+      if (typeof v !== "undefined") res.setHeader(k, v);
     }
     res.setHeader("cache-control", upstream.headers["cache-control"] || "no-store");
     upstream.data.pipe(res);
@@ -362,13 +422,21 @@ app.get("/api/proxy", async (req, res) => {
   }
 });
 
-/* ================= 登录（统一密码） ================= */
+/* ================= 登录 ================= */
 
 app.post("/api/login", (req, res) => {
   const { password } = req.body;
 
-  // 统一验证一个密码
-  if (password === SITE_PASSWORD) {
+  if (password === ADMIN_PASSWORD) {
+    return res.json({
+      success: true,
+      role: "admin",
+      token: signToken({ role: "admin" }),
+      needSetUserPassword: !USER_PASSWORD,
+    });
+  }
+
+  if (USER_PASSWORD && password === USER_PASSWORD) {
     return res.json({
       success: true,
       role: "user",
@@ -382,11 +450,18 @@ app.post("/api/login", (req, res) => {
 /* ================= 用户接口 ================= */
 
 app.get("/api/sources", auth, (req, res) => {
+  // 统一规范 enabled 字段：只有显式为 true 才视为启用，其余一律 false
   const normalized = SOURCE_CACHE.map((s) => ({
     ...s,
     enabled: s.enabled === true,
   }));
 
+  // 如果是管理员，返回所有源站和完整字段（包含 url 和 enabled）
+  if (req.user.role === "admin") {
+    return res.json(normalized);
+  }
+
+  // 普通用户只返回启用的源站和基本字段（不暴露 url）
   res.json(
     normalized
       .filter((s) => s.enabled === true)
@@ -419,26 +494,90 @@ app.get("/api/video", auth, async (req, res) => {
   }
 });
 
-/* ================= 管理员接口（简化） ================= */
+/* ================= 管理员接口 ================= */
 
 app.get("/api/admin/sources/redis", auth, adminOnly, async (req, res) => {
-  res.json([]);
+  if (!redis) {
+    return res.json([]);
+  }
+
+  try {
+    const data = await redis.get("video:source");
+    if (!data) return res.json([]);
+
+    const sources = JSON.parse(data).map((s) => ({
+      ...s,
+      // Redis 可能没有 enable 字段，默认启用
+      enabled: s.enabled === false ? false : true,
+      // 确保 url 字段存在，默认为空字符串
+      url: s.url || "",
+      // 确保 name 和 key 字段存在
+      name: s.name || "",
+      key: s.key || ""
+    }));
+
+    res.json(sources);
+  } catch (err) {
+    logger.error("从 Redis 拉取源站失败:", err.message);
+    res.status(500).json({ msg: "拉取源站数据失败" });
+  }
 });
+
 
 app.post("/api/admin/sources", auth, adminOnly, async (req, res) => {
-  res.json({ success: true, msg: "ok" });
+  const { sources, syncToRedis = false } = req.body;
+  if (!Array.isArray(sources)) {
+    return res.status(400).json({ msg: "源站数据格式错误" });
+  }
+
+  // 固定 IPTV 源（key=iptv）始终存在，默认禁用，可在后台启用/排序，但不能真正删除
+  const finalSources = ensureIptvSource(sources);
+
+  SOURCE_CACHE = finalSources;
+  writeJson("sources.json", finalSources);
+
+  if (syncToRedis && redis) {
+    await redis.set("video:source", JSON.stringify(finalSources));
+  }
+
+  res.json({ success: true, msg: "源站已保存" });
 });
 
+// 更新管理员密码
 app.post("/api/admin/password", auth, adminOnly, async (req, res) => {
-  res.json({ success: true, msg: "ok" });
+  const { password } = req.body;
+
+  if (!password || password === ADMIN_PASSWORD) {
+    return res.status(400).json({ msg: "管理员密码不合法" });
+  }
+
+  ADMIN_PASSWORD = password;
+  writeJson("admin.json", { password });
+
+  res.json({ success: true, msg: "管理员密码已更新" });
 });
 
+// 更新用户访问密码
 app.post("/api/user/password", auth, adminOnly, async (req, res) => {
-  res.json({ success: true, msg: "ok" });
+  const { password } = req.body;
+
+  if (!password) {
+    return res.status(400).json({ msg: "用户密码不合法" });
+  }
+
+  USER_PASSWORD = password;
+  writeJson("password.json", { password });
+
+  if (redis) await redis.set("video:password", password);
+
+  res.json({ success: true, msg: "用户密码已设置" });
 });
 
-// --- 静态文件 ---
+// --- 静态文件服务 (可选) ---
+// 如果你打包了 React 项目 (npm run build)，将 dist 目录放在 server.js 同级
 app.use(express.static(path.join(__dirname, 'dist')));
+
+// SPA 路由支持：任何未处理的请求返回 index.html
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
@@ -446,4 +585,6 @@ app.get('*', (req, res) => {
 /* ================= 启动 ================= */
 app.listen(PORT, () => {
   logger.info(`🚀 服务已启动：http://localhost:${PORT}`);
+  logger.info(`👉 接口地址: http://localhost:${PORT}/api/video`);
+
 });
