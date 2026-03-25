@@ -6,7 +6,7 @@
 在项目根目录手动执行构建：
 ```bash
 docker build -t movie-app .
-```
+``` 
 
 **第二步：运行容器**
 使用 Docker Compose 启动：
