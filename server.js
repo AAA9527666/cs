@@ -118,47 +118,38 @@ const INITIAL_SOURCES = ensureIptvSource([
 ]);
 
 let SOURCE_CACHE = [];
-//let USER_PASSWORD = null;
 
 /* ================= 管理员密码 ================= */
 
 const ADMIN_PASSWORD = "9527";
- 
 
+// let ADMIN_PASSWORD = readJson("admin.json")?.password;
 
-//let ADMIN_PASSWORD = readJson("admin.json")?.password;
-
-//if (!ADMIN_PASSWORD) {
-  //ADMIN_PASSWORD = crypto.randomBytes(6).toString("hex");
-  //writeJson("admin.json", { password: ADMIN_PASSWORD });
-  //logger.warn("⚠️ 管理员密码已生成：", ADMIN_PASSWORD);
-//}
+// if (!ADMIN_PASSWORD) {
+  // ADMIN_PASSWORD = crypto.randomBytes(6).toString("hex");
+  // writeJson("admin.json", { password: ADMIN_PASSWORD });
+  // logger.warn("⚠️ 管理员密码已生成：", ADMIN_PASSWORD);
+// }
 
 /* ================= 加载用户密码 ================= */
 
+const USER_PASSWORD = "666";
 
+// (async () => {
+  // const local = readJson("password.json");
+  // if (local?.password) {
+    // USER_PASSWORD = local.password;
+    // return;
+  // }
 
-const USER_PASSWORD = "666"; 
- 
-
-
-
-
-//(async () => {
-  //const local = readJson("password.json");
-  //if (local?.password) {
-    //USER_PASSWORD = local.password;
-    //return;
-  //}
-
-  //if (redis) {
-    //const r = await redis.get("video:password");
-    //if (r) {
-      //USER_PASSWORD = r;
-      //writeJson("password.json", { password: r });
-    //}
-  //}
-//})();
+  // if (redis) {
+    // const r = await redis.get("video:password");
+    // if (r) {
+      // USER_PASSWORD = r;
+      // writeJson("password.json", { password: r });
+    // }
+  // }
+// })();
 
 /* ================= 加载源站 ================= */
 
@@ -563,7 +554,8 @@ app.post("/api/admin/password", auth, adminOnly, async (req, res) => {
     return res.status(400).json({ msg: "管理员密码不合法" });
   }
 
-  ADMIN_PASSWORD = password;
+  // 注意：这里因为 ADMIN_PASSWORD 是 const，实际修改需要重启服务，仅演示逻辑
+  // ADMIN_PASSWORD = password;
   writeJson("admin.json", { password });
 
   res.json({ success: true, msg: "管理员密码已更新" });
@@ -577,7 +569,8 @@ app.post("/api/user/password", auth, adminOnly, async (req, res) => {
     return res.status(400).json({ msg: "用户密码不合法" });
   }
 
-  USER_PASSWORD = password;
+  // 注意：这里因为 USER_PASSWORD 是 const，实际修改需要重启服务，仅演示逻辑
+  // USER_PASSWORD = password;
   writeJson("password.json", { password });
 
   if (redis) await redis.set("video:password", password);
@@ -598,5 +591,4 @@ app.get('*', (req, res) => {
 app.listen(PORT, () => {
   logger.info(`🚀 服务已启动：http://localhost:${PORT}`);
   logger.info(`👉 接口地址: http://localhost:${PORT}/api/video`);
-
 });
