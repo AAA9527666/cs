@@ -122,31 +122,43 @@ let USER_PASSWORD = null;
 
 /* ================= 管理员密码 ================= */
 
-let ADMIN_PASSWORD = readJson("admin.json")?.password;
+const ADMIN_PASSWORD = "9527";
+ 
 
-if (!ADMIN_PASSWORD) {
-  ADMIN_PASSWORD = crypto.randomBytes(6).toString("hex");
-  writeJson("admin.json", { password: ADMIN_PASSWORD });
-  logger.warn("⚠️ 管理员密码已生成：", ADMIN_PASSWORD);
-}
+
+//let ADMIN_PASSWORD = readJson("admin.json")?.password;
+
+//if (!ADMIN_PASSWORD) {
+  //ADMIN_PASSWORD = crypto.randomBytes(6).toString("hex");
+  //writeJson("admin.json", { password: ADMIN_PASSWORD });
+  //logger.warn("⚠️ 管理员密码已生成：", ADMIN_PASSWORD);
+//}
 
 /* ================= 加载用户密码 ================= */
 
-(async () => {
-  const local = readJson("password.json");
-  if (local?.password) {
-    USER_PASSWORD = local.password;
-    return;
-  }
 
-  if (redis) {
-    const r = await redis.get("video:password");
-    if (r) {
-      USER_PASSWORD = r;
-      writeJson("password.json", { password: r });
-    }
-  }
-})();
+// 直接写死访问密码，不再读取文件或 Redis
+const USER_PASSWORD = "666"; 
+ 
+
+
+
+
+//(async () => {
+  //const local = readJson("password.json");
+  //if (local?.password) {
+    //USER_PASSWORD = local.password;
+    //return;
+  //}
+
+  //if (redis) {
+    //const r = await redis.get("video:password");
+    //if (r) {
+      //USER_PASSWORD = r;
+      //writeJson("password.json", { password: r });
+    //}
+  //}
+//})();
 
 /* ================= 加载源站 ================= */
 
