@@ -421,11 +421,12 @@ app.get("/api/proxy", async (req, res) => {
     res.status(502).send("proxy failed");
   }
 });
-/* ================= 登录（修复版） ================= */
-app.post("/api/login", async (req, res) => { // 改成 async
+
+/* ================= 登录（写死密码版） ================= */
+app.post("/api/login", (req, res) => {
   const { password } = req.body;
 
-  // 1. 优先验证管理员密码
+  // 1. 管理员密码（保持不变）
   if (password === ADMIN_PASSWORD) {
     return res.json({
       success: true,
@@ -435,20 +436,9 @@ app.post("/api/login", async (req, res) => { // 改成 async
     });
   }
 
-  // 2. 核心修复：如果 USER_PASSWORD 为空，强制从 Redis 读取
-  let finalUserPassword = USER_PASSWORD;
-  if (!finalUserPassword && redis) {
-    logger.info("本地无用户密码，尝试从 Redis 读取...");
-    finalUserPassword = await redis.get("video:password"); // 直接从 Redis 获取
-    if (finalUserPassword) {
-      // 读到后写入本地文件，下次启动不用再查 Redis
-      writeJson("password.json", { password: finalUserPassword });
-      USER_PASSWORD = finalUserPassword; // 更新全局变量
-    }
-  }
-
-  // 3. 验证用户密码
-  if (finalUserPassword && password === finalUserPassword) {
+  // 2. 固定用户密码（可修改为你想要的密码）
+  const FIXED_USER_PASSWORD = "666666";
+  if (password === FIXED_USER_PASSWORD) {
     return res.json({
       success: true,
       role: "user",
@@ -456,35 +446,10 @@ app.post("/api/login", async (req, res) => { // 改成 async
     });
   }
 
-  // 4. 都不对才返回错误
+  // 3. 密码错误时返回
   res.status(401).json({ msg: "密码错误" });
 });
 
-// * ================= 登录 ================= */
-// 
-// app.post("/api/login", (req, res) => {
- //  const { password } = req.body;
-// 
- //  if (password === ADMIN_PASSWORD) {
- //    return res.json({
-  //     success: true,
- //      role: "admin",
- //      token: signToken({ role: "admin" }),
- //      needSetUserPassword: !USER_PASSWORD,
-//     });
-//   }
-// 
-//   if (USER_PASSWORD && password === USER_PASSWORD) {
-//     return res.json({
- //      success: true,
- //      role: "user",
- //      token: signToken({ role: "user" }),
- //    });
- //  }
-// 
- //  res.status(401).json({ msg: "密码错误" });
-// });
-// 
 /* ================= 用户接口 ================= */
 
 app.get("/api/sources", auth, (req, res) => {
