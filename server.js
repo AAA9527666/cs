@@ -32,16 +32,8 @@ const logger = {
 
 /* ================= Redis ================= */
 
-// 默认尝试连接本机 Redis，除非显式覆盖 REDIS_URL
 const DEFAULT_REDIS_URL = "redis://127.0.0.1:6379/0";
 const REDIS_URL = process.env.REDIS_URL || DEFAULT_REDIS_URL;
-
-if (!process.env.REDIS_URL) {
-  logger.warn(
-    "未显式配置 REDIS_URL，使用默认 Redis 配置：",
-    DEFAULT_REDIS_URL
-  );
-}
 
 const redis = new Redis(REDIS_URL, { retryStrategy: () => null });
 
@@ -119,13 +111,8 @@ const INITIAL_SOURCES = ensureIptvSource([
 
 let SOURCE_CACHE = [];
 
-/* ================= 管理员密码 ================= */
-
-const ADMIN_PASSWORD = "9527";
-
-/* ================= 加载用户密码 ================= */
-
-const USER_PASSWORD = "666";
+/* ================= 统一密码 ================= */
+const SITE_PASSWORD = "123123";
 
 /* ================= 加载源站 ================= */
 
@@ -182,7 +169,6 @@ if (redis) {
   );
 }
 
-// 管理员手动刷新一次，并写入 Redis（如果存在）
 app.get("/api/iptv/cctv/refresh", auth, adminOnly, async (req, res) => {
   const r = await parseIptvToAppleCmsCctv({
     url: IPTV_CCTV_URL,
@@ -194,7 +180,6 @@ app.get("/api/iptv/cctv/refresh", auth, adminOnly, async (req, res) => {
   res.json(r);
 });
 
-// 作为“第三方源”的 Apple CMS 风格接口
 app.get("/api/source/iptv", auth, async (req, res) => {
   try {
     let cached = null;
@@ -336,9 +321,7 @@ app.get("/api/proxy", async (req, res) => {
       maxRedirects: 3,
       headers: {
         ...(req.headers.range ? { range: req.headers.range } : {}),
-        "user-agent":
-          req.headers["user-agent"] ||
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) movie-app/proxy",
+        "user-agent": req.headers["user-agent"] || "Mozilla/5.0",
         accept: req.headers.accept || "*/*",
       },
       httpsAgent: new https.Agent({ rejectUnauthorized: false }),
@@ -358,10 +341,7 @@ app.get("/api/proxy", async (req, res) => {
           req,
         });
         res.status(upstream.status || 200);
-        res.setHeader(
-          "content-type",
-          "application/vnd.apple.mpegurl; charset=utf-8"
-        );
+        res.setHeader("content-type", "application/vnd.apple.mpegurl; charset=utf-8");
         res.setHeader("cache-control", upstream.headers["cache-control"] || "no-store");
         res.send(rewritten);
       });
@@ -372,14 +352,8 @@ app.get("/api/proxy", async (req, res) => {
     res.status(upstream.status || 200);
     for (const [k, v] of Object.entries(upstream.headers || {})) {
       const key = k.toLowerCase();
-      if (
-        key === "transfer-encoding" ||
-        key === "content-encoding" ||
-        key === "connection"
-      ) {
-        continue;
-      }
-      if (typeof v !== "undefined") res.setHeader(k, v);
+      if (["transfer-encoding", "content-encoding", "connection"].includes(key)) continue;
+      if (v) res.setHeader(k, v);
     }
     res.setHeader("cache-control", upstream.headers["cache-control"] || "no-store");
     upstream.data.pipe(res);
@@ -388,16 +362,21 @@ app.get("/api/proxy", async (req, res) => {
   }
 });
 
-/* ================= 登录（免密版） ================= */
+/* ================= 登录（统一密码） ================= */
 
 app.post("/api/login", (req, res) => {
-  // ✅ 直接返回成功，不校验任何密码
-  return res.json({
-    success: true,
-    role: "user",
-    token: signToken({ role: "user" }),
-    expiresIn: "2h"
-  });
+  const { password } = req.body;
+
+  // 统一验证一个密码
+  if (password === SITE_PASSWORD) {
+    return res.json({
+      success: true,
+      role: "user",
+      token: signToken({ role: "user" }),
+    });
+  }
+
+  res.status(401).json({ msg: "密码错误" });
 });
 
 /* ================= 用户接口 ================= */
@@ -407,10 +386,6 @@ app.get("/api/sources", auth, (req, res) => {
     ...s,
     enabled: s.enabled === true,
   }));
-
-  if (req.user.role === "admin") {
-    return res.json(normalized);
-  }
 
   res.json(
     normalized
@@ -444,69 +419,25 @@ app.get("/api/video", auth, async (req, res) => {
   }
 });
 
-/* ================= 管理员接口 ================= */
+/* ================= 管理员接口（简化） ================= */
 
 app.get("/api/admin/sources/redis", auth, adminOnly, async (req, res) => {
-  if (!redis) {
-    return res.json([]);
-  }
-
-  try {
-    const data = await redis.get("video:source");
-    if (!data) return res.json([]);
-
-    const sources = JSON.parse(data).map((s) => ({
-      ...s,
-      enabled: s.enabled === false ? false : true,
-      url: s.url || "",
-      name: s.name || "",
-      key: s.key || ""
-    }));
-
-    res.json(sources);
-  } catch (err) {
-    logger.error("从 Redis 拉取源站失败:", err.message);
-    res.status(500).json({ msg: "拉取源站数据失败" });
-  }
+  res.json([]);
 });
 
 app.post("/api/admin/sources", auth, adminOnly, async (req, res) => {
-  const { sources, syncToRedis = false } = req.body;
-  if (!Array.isArray(sources)) {
-    return res.status(400).json({ msg: "源站数据格式错误" });
-  }
-
-  const finalSources = ensureIptvSource(sources);
-  SOURCE_CACHE = finalSources;
-  writeJson("sources.json", finalSources);
-
-  if (syncToRedis && redis) {
-    await redis.set("video:source", JSON.stringify(finalSources));
-  }
-
-  res.json({ success: true, msg: "源站已保存" });
+  res.json({ success: true, msg: "ok" });
 });
 
 app.post("/api/admin/password", auth, adminOnly, async (req, res) => {
-  const { password } = req.body;
-  if (!password || password === ADMIN_PASSWORD) {
-    return res.status(400).json({ msg: "管理员密码不合法" });
-  }
-  writeJson("admin.json", { password });
-  res.json({ success: true, msg: "管理员密码已更新" });
+  res.json({ success: true, msg: "ok" });
 });
 
 app.post("/api/user/password", auth, adminOnly, async (req, res) => {
-  const { password } = req.body;
-  if (!password) {
-    return res.status(400).json({ msg: "用户密码不合法" });
-  }
-  writeJson("password.json", { password });
-  if (redis) await redis.set("video:password", password);
-  res.json({ success: true, msg: "用户密码已设置" });
+  res.json({ success: true, msg: "ok" });
 });
 
-// --- 静态文件服务 ---
+// --- 静态文件 ---
 app.use(express.static(path.join(__dirname, 'dist')));
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
