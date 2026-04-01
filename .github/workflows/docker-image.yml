@@ -1,0 +1,44 @@
+name: Build and Deploy Frontend to Pages
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 使用你的 Dockerfile 构建并提取 dist 前端产物
+      - name: Build with Docker and extract dist
+        run: |
+          docker build -t myapp .
+          docker create --name temp myapp
+          docker cp temp:/app/dist ./dist
+          docker rm temp
+
+      # 上传前端静态文件
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./dist
+
+  # 部署到 GitHub Pages
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
