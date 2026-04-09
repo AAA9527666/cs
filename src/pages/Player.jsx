@@ -5,7 +5,7 @@ import { api } from '../api';
 import { stopAllPlayers } from '../utils/playerManager';
 import { getVideoWatchHistory, updateWatchHistory } from '../utils/historyManager';
 
-export default function Player() {
+export default function Player({ setToastMessage }) {
   const { sourceKey, videoId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
@@ -206,6 +206,7 @@ export default function Player() {
       onVideoClick={handleVideoClick}
       onBack={handleBack}
       resumeTime={resumeTime}
+      setToastMessage={setToastMessage}
     />
   );
 }

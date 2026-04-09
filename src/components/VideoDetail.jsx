@@ -11,7 +11,8 @@ const VideoDetail = ({
   recommendVideos = [],
   onVideoClick,
   onBack,
-  resumeTime = 0
+  resumeTime = 0,
+  setToastMessage
 }) => {
   const [mainTab, setMainTab] = useState('episodes'); // 'episodes' 或 'recommend'
   const [recommendTab, setRecommendTab] = useState(0);
@@ -68,6 +69,7 @@ const VideoDetail = ({
           currentEpisodeIndex={currentEpisodeIndex}
           parsedEpisodes={parsedEpisodes}
           resumeTime={shouldResumeRef.current ? resumeTime : 0}
+          setToastMessage={setToastMessage}
         />
 
         {/* 剧情简介 */}

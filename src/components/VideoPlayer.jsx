@@ -4,9 +4,10 @@ import { hlsInstances, plyrInstances, stopAllPlayers } from '../utils/playerMana
 import { updateWatchHistory } from '../utils/historyManager.js';
 import '../player.css';
 
-const VideoPlayer = ({ src, poster, title, sourceName, sourceDesc, onBack, currentVideo, currentEpisodeIndex, parsedEpisodes, resumeTime }) => {
+const VideoPlayer = ({ src, poster, title, sourceName, sourceDesc, onBack, currentVideo, currentEpisodeIndex, parsedEpisodes, resumeTime, setToastMessage }) => {
   const [error, setError] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [autoSkipAdsEnabled, setAutoSkipAdsEnabled] = useState(true);
   const videoRef = useRef(null);
   const playerContainerRef = useRef(null);
   const hlsRef = useRef(null);
@@ -16,6 +17,90 @@ const VideoPlayer = ({ src, poster, title, sourceName, sourceDesc, onBack, curre
   const playerId = useRef(Date.now() + Math.random().toString(36).substring(2, 10)); // 生成唯一ID
   const saveProgressIntervalRef = useRef(null);
   const hasRestoredTimeRef = useRef(false);
+  const adRangesRef = useRef([]);
+  const lastAutoSkipRef = useRef({ at: 0, target: 0 });
+  const lastToastRef = useRef({ detectAt: 0, skipAt: 0 });
+
+  const detectAdRangesFromLevel = (details, playlistUrl) => {
+    const fragments = details?.fragments || [];
+    if (fragments.length < 2) return [];
+
+    const resolveTsUrl = (frag) => {
+      const raw = frag?.url || frag?.relurl || '';
+      if (!raw) return '';
+      try {
+        return new URL(raw, playlistUrl).toString();
+      } catch {
+        return raw;
+      }
+    };
+
+    const groups = [];
+    let currentGroup = [];
+
+    const flushGroup = () => {
+      if (currentGroup.length === 0) return;
+      const first = currentGroup[0];
+      const last = currentGroup[currentGroup.length - 1];
+      const duration = currentGroup.reduce((sum, frag) => sum + (frag.duration || 0), 0);
+
+      let pathKey = '';
+      try {
+        const absoluteUrl = new URL(first.url || first.relurl || '', playlistUrl);
+        const parts = absoluteUrl.pathname.split('/').filter(Boolean);
+        pathKey = parts.slice(0, 2).join('/');
+      } catch {
+        pathKey = '';
+      }
+
+      const hasAdKeyword = currentGroup.some((frag) => {
+        const url = (frag.url || frag.relurl || '').toLowerCase();
+        return /\/ads?\b|advert|guanggao|\/gg\//.test(url);
+      });
+
+      groups.push({
+        start: first.start || 0,
+        end: (last.start || 0) + (last.duration || 0),
+        duration,
+        pathKey,
+        hasAdKeyword,
+        tsUrls: currentGroup.map(resolveTsUrl).filter(Boolean)
+      });
+      currentGroup = [];
+    };
+
+    for (let i = 0; i < fragments.length; i += 1) {
+      const frag = fragments[i];
+      if (currentGroup.length === 0) {
+        currentGroup.push(frag);
+        continue;
+      }
+
+      const prev = currentGroup[currentGroup.length - 1];
+      // 有些源不稳定提供 cc，额外用 discontinuity 标记切组
+      if ((frag.cc || 0) !== (prev.cc || 0) || frag.discontinuity) {
+        flushGroup();
+      }
+      currentGroup.push(frag);
+    }
+    flushGroup();
+
+    if (groups.length < 2) return [];
+
+    const mainGroup = groups.reduce((maxGroup, group) => (
+      group.duration > maxGroup.duration ? group : maxGroup
+    ), groups[0]);
+
+    return groups
+      .filter((group) => group !== mainGroup)
+      .filter((group) => group.duration > 0.2 && group.duration <= 180)
+      .filter((group) => group.hasAdKeyword || (mainGroup.pathKey && group.pathKey && group.pathKey !== mainGroup.pathKey))
+      .map((group) => ({
+        start: Math.max(0, group.start),
+        end: Math.max(group.start, group.end),
+        tsUrls: group.tsUrls || []
+      }));
+  };
 
   // 初始化播放器
   useEffect(() => {
@@ -61,7 +146,23 @@ const VideoPlayer = ({ src, poster, title, sourceName, sourceDesc, onBack, curre
             });
 
             // HLS 加载完成后，也尝试恢复播放进度
-            hls.on(Hls.Events.LEVEL_LOADED, () => {
+            hls.on(Hls.Events.LEVEL_LOADED, (event, data) => {
+              const details = data?.details || hls.levels?.[hls.currentLevel]?.details;
+              const levelUrl = data?.levelInfo?.url?.[0] || data?.url || src;
+              adRangesRef.current = detectAdRangesFromLevel(details, levelUrl);
+              if (adRangesRef.current.length > 0) {
+                console.log('🧩 已识别疑似广告区间:', adRangesRef.current);
+                if (setToastMessage) {
+                  const now = Date.now();
+                  if (now - lastToastRef.current.detectAt > 3000) {
+                    lastToastRef.current.detectAt = now;
+                    setToastMessage(`已识别疑似广告区间，自动跳过：${autoSkipAdsEnabled ? '开' : '关'}`);
+                  }
+                }
+              } else {
+                console.log('🧩 未识别到可跳过广告区间');
+              }
+
               // 延迟一点时间，确保视频元数据已加载
               setTimeout(() => {
                 if (video.duration > 0 && resumeTime > 0 && !hasRestoredTimeRef.current) {
@@ -309,6 +410,36 @@ const VideoPlayer = ({ src, poster, title, sourceName, sourceDesc, onBack, curre
             duration: duration
           });
         }
+
+        // 自动跳过疑似广告区间（可手动开关）
+        const adRanges = adRangesRef.current;
+        if (autoSkipAdsEnabled && adRanges.length > 0) {
+          const hitRange = adRanges.find((range) => currentTime >= (range.start - 0.15) && currentTime < range.end);
+          if (hitRange) {
+            const now = Date.now();
+            // 防止 seek 后重复触发导致循环跳转
+            if (now - lastAutoSkipRef.current.at > 1200 || Math.abs(lastAutoSkipRef.current.target - hitRange.end) > 0.5) {
+              const targetTime = Math.min(hitRange.end + 0.2, duration > 0 ? duration - 0.1 : hitRange.end + 0.2);
+              lastAutoSkipRef.current = { at: now, target: targetTime };
+              video.currentTime = targetTime;
+              if (plyrRef.current) {
+                plyrRef.current.currentTime = targetTime;
+              }
+              console.log(
+                `⏭️ 自动跳过疑似广告片段: ${hitRange.start.toFixed(2)}s -> ${hitRange.end.toFixed(2)}s, ` +
+                `当前=${currentTime.toFixed(2)}s, 跳转到=${targetTime.toFixed(2)}s`
+              );
+              if (setToastMessage) {
+                const toastNow = Date.now();
+                if (toastNow - lastToastRef.current.skipAt > 1500) {
+                  lastToastRef.current.skipAt = toastNow;
+                  setToastMessage('已自动跳过疑似广告片段');
+                }
+              }
+              return;
+            }
+          }
+        }
       };
 
       // 节流函数，避免频繁保存
@@ -373,6 +504,9 @@ const VideoPlayer = ({ src, poster, title, sourceName, sourceDesc, onBack, curre
 
       isInitialized.current = false;
       hasRestoredTimeRef.current = false;
+      adRangesRef.current = [];
+      lastAutoSkipRef.current = { at: 0, target: 0 };
+      lastToastRef.current = { detectAt: 0, skipAt: 0 };
       
       // 清理保存进度的定时器
       if (saveProgressIntervalRef.current) {
@@ -380,7 +514,7 @@ const VideoPlayer = ({ src, poster, title, sourceName, sourceDesc, onBack, curre
         saveProgressIntervalRef.current = null;
       }
     };
-  }, [src, poster, retryKey, resumeTime, currentVideo, currentEpisodeIndex, parsedEpisodes]);
+  }, [src, poster, retryKey, resumeTime, currentVideo, currentEpisodeIndex, parsedEpisodes, autoSkipAdsEnabled]);
 
   // 当 resumeTime 变化时，重置恢复标志，以便新的 resumeTime 能够生效
   useEffect(() => {
@@ -468,7 +602,6 @@ const VideoPlayer = ({ src, poster, title, sourceName, sourceDesc, onBack, curre
           <AlertCircle size={14} />
           <span>请勿相信视频内任何广告</span>
         </div>
-
       </div>
 
       <div className="player-shell relative z-10 w-full aspect-video bg-black rounded-xl overflow-visible shadow-2xl ring-1 ring-white/10 group" ref={playerContainerRef}>
@@ -528,6 +661,25 @@ const VideoPlayer = ({ src, poster, title, sourceName, sourceDesc, onBack, curre
           )}
           <span className="bg-slate-800 px-2 py-0.5 rounded">HLS</span>
           <span className="bg-blue-900/30 text-blue-400 px-2 py-0.5 rounded">高清</span>
+          <div className="relative group">
+            <button
+              onClick={() => setAutoSkipAdsEnabled((prev) => !prev)}
+              className={`px-2 py-0.5 rounded border transition-all ${
+                autoSkipAdsEnabled
+                  ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30 hover:bg-emerald-500/20'
+                  : 'text-slate-300 bg-slate-700/30 border-slate-500/40 hover:bg-slate-600/40'
+              }`}
+              aria-label="切换自动跳过广告"
+            >
+                跳过广告：{autoSkipAdsEnabled ? '开' : '关'}
+            </button>
+            <div className="absolute top-full mt-2 left-0 z-[100] pointer-events-none invisible group-hover:visible opacity-0 group-hover:opacity-100 transition-all duration-200">
+              <div className="bg-slate-900 text-slate-200 text-[10px] px-2 py-1 rounded border border-white/10 whitespace-nowrap shadow-xl">
+                切换是否自动跳过疑似广告片段
+              </div>
+              <div className="w-2 h-2 bg-slate-900 border-l border-t border-white/10 absolute -top-1 left-3 rotate-45"></div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

@@ -220,7 +220,7 @@ export default function App() {
               />
             }
           />
-          <Route path="/play/:sourceKey/:videoId" element={<Player />} />
+          <Route path="/play/:sourceKey/:videoId" element={<Player setToastMessage={setToastMessage} />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </main>
