@@ -4,10 +4,48 @@ import { hlsInstances, plyrInstances, stopAllPlayers } from '../utils/playerMana
 import { updateWatchHistory } from '../utils/historyManager.js';
 import '../player.css';
 
+const AUTO_SKIP_ADS_STORAGE_KEY = 'movie_app_auto_skip_ads';
+
+const loadAutoSkipAdsFromStorage = () => {
+  try {
+    const raw = localStorage.getItem(AUTO_SKIP_ADS_STORAGE_KEY);
+    if (raw === null) return true;
+    return JSON.parse(raw) !== false;
+  } catch {
+    return true;
+  }
+};
+
+const persistAutoSkipAds = (enabled) => {
+  try {
+    localStorage.setItem(AUTO_SKIP_ADS_STORAGE_KEY, JSON.stringify(enabled));
+  } catch {
+    /* ignore quota / private mode */
+  }
+};
+
+/** 将秒数转为 HH:MM:SS[.mmm]，便于日志与提示阅读 */
+const formatSecondsToHMS = (totalSeconds) => {
+  if (totalSeconds == null || Number.isNaN(totalSeconds)) return '00:00:00';
+  const t = Number(totalSeconds);
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const s = t % 60;
+  const whole = Math.floor(s);
+  const ms = Math.round((s - whole) * 1000);
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const msPart = ms > 0 ? `.${String(ms).padStart(3, '0')}` : '';
+  return `${pad2(h)}:${pad2(m)}:${pad2(whole)}${msPart}`;
+};
+
 const VideoPlayer = ({ src, poster, title, sourceName, sourceDesc, onBack, currentVideo, currentEpisodeIndex, parsedEpisodes, resumeTime, setToastMessage }) => {
   const [error, setError] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [autoSkipAdsEnabled, setAutoSkipAdsEnabled] = useState(true);
+  const [autoSkipAdsEnabled, setAutoSkipAdsEnabled] = useState(() => loadAutoSkipAdsFromStorage());
+  /** 与 state 同步，供 HLS 回调 / timeupdate 闭包读取，避免把开关放进播放器 init 的 effect 依赖（否则会整实例重建导致黑屏） */
+  const autoSkipAdsEnabledRef = useRef(autoSkipAdsEnabled);
+  autoSkipAdsEnabledRef.current = autoSkipAdsEnabled;
+
   const videoRef = useRef(null);
   const playerContainerRef = useRef(null);
   const hlsRef = useRef(null);
@@ -95,11 +133,17 @@ const VideoPlayer = ({ src, poster, title, sourceName, sourceDesc, onBack, curre
       .filter((group) => group !== mainGroup)
       .filter((group) => group.duration > 0.2 && group.duration <= 180)
       .filter((group) => group.hasAdKeyword || (mainGroup.pathKey && group.pathKey && group.pathKey !== mainGroup.pathKey))
-      .map((group) => ({
-        start: Math.max(0, group.start),
-        end: Math.max(group.start, group.end),
-        tsUrls: group.tsUrls || []
-      }));
+      .map((group) => {
+        const start = Math.max(0, group.start);
+        const end = Math.max(group.start, group.end);
+        return {
+          start,
+          end,
+          startHMS: formatSecondsToHMS(start),
+          endHMS: formatSecondsToHMS(end),
+          tsUrls: group.tsUrls || []
+        };
+      });
   };
 
   // 初始化播放器
@@ -156,7 +200,7 @@ const VideoPlayer = ({ src, poster, title, sourceName, sourceDesc, onBack, curre
                   const now = Date.now();
                   if (now - lastToastRef.current.detectAt > 3000) {
                     lastToastRef.current.detectAt = now;
-                    setToastMessage(`已识别疑似广告区间，自动跳过：${autoSkipAdsEnabled ? '开' : '关'}`);
+                    setToastMessage(`已识别疑似广告区间，自动跳过：${autoSkipAdsEnabledRef.current ? '开' : '关'}`);
                   }
                 }
               } else {
@@ -413,7 +457,7 @@ const VideoPlayer = ({ src, poster, title, sourceName, sourceDesc, onBack, curre
 
         // 自动跳过疑似广告区间（可手动开关）
         const adRanges = adRangesRef.current;
-        if (autoSkipAdsEnabled && adRanges.length > 0) {
+        if (autoSkipAdsEnabledRef.current && adRanges.length > 0) {
           const hitRange = adRanges.find((range) => currentTime >= (range.start - 0.15) && currentTime < range.end);
           if (hitRange) {
             const now = Date.now();
@@ -426,14 +470,17 @@ const VideoPlayer = ({ src, poster, title, sourceName, sourceDesc, onBack, curre
                 plyrRef.current.currentTime = targetTime;
               }
               console.log(
-                `⏭️ 自动跳过疑似广告片段: ${hitRange.start.toFixed(2)}s -> ${hitRange.end.toFixed(2)}s, ` +
-                `当前=${currentTime.toFixed(2)}s, 跳转到=${targetTime.toFixed(2)}s`
+                `⏭️ 自动跳过疑似广告片段: ${hitRange.startHMS || formatSecondsToHMS(hitRange.start)} ~ ${hitRange.endHMS || formatSecondsToHMS(hitRange.end)} ` +
+                `(${hitRange.start.toFixed(2)}s -> ${hitRange.end.toFixed(2)}s), ` +
+                `当前=${formatSecondsToHMS(currentTime)} (${currentTime.toFixed(2)}s), 跳转到=${formatSecondsToHMS(targetTime)} (${targetTime.toFixed(2)}s)`
               );
               if (setToastMessage) {
                 const toastNow = Date.now();
                 if (toastNow - lastToastRef.current.skipAt > 1500) {
                   lastToastRef.current.skipAt = toastNow;
-                  setToastMessage('已自动跳过疑似广告片段');
+                  setToastMessage(
+                    `已自动跳过疑似广告片段 ${hitRange.startHMS || formatSecondsToHMS(hitRange.start)} ~ ${hitRange.endHMS || formatSecondsToHMS(hitRange.end)}`
+                  );
                 }
               }
               return;
@@ -514,7 +561,7 @@ const VideoPlayer = ({ src, poster, title, sourceName, sourceDesc, onBack, curre
         saveProgressIntervalRef.current = null;
       }
     };
-  }, [src, poster, retryKey, resumeTime, currentVideo, currentEpisodeIndex, parsedEpisodes, autoSkipAdsEnabled]);
+  }, [src, poster, retryKey, resumeTime, currentVideo, currentEpisodeIndex, parsedEpisodes]);
 
   // 当 resumeTime 变化时，重置恢复标志，以便新的 resumeTime 能够生效
   useEffect(() => {
@@ -663,7 +710,13 @@ const VideoPlayer = ({ src, poster, title, sourceName, sourceDesc, onBack, curre
           <span className="bg-blue-900/30 text-blue-400 px-2 py-0.5 rounded">高清</span>
           <div className="relative group">
             <button
-              onClick={() => setAutoSkipAdsEnabled((prev) => !prev)}
+              onClick={() => {
+                setAutoSkipAdsEnabled((prev) => {
+                  const next = !prev;
+                  persistAutoSkipAds(next);
+                  return next;
+                });
+              }}
               className={`px-2 py-0.5 rounded border transition-all ${
                 autoSkipAdsEnabled
                   ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30 hover:bg-emerald-500/20'
